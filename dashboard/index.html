@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hive Streaming — QoS Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500&display=swap');
+
+  :root {
+    --bg:       #08090d;
+    --surface:  #0f1117;
+    --border:   #1e2130;
+    --accent:   #00e5ff;
+    --warn:     #ff4d6d;
+    --ok:       #00e5a0;
+    --muted:    #3a3f55;
+    --text:     #e2e6f0;
+    --sub:      #7a8099;
+    --q1080:    #00e5ff;
+    --q720:     #7b61ff;
+    --q360:     #ff9f43;
+    --q270:     #ff4d6d;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 300;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* grid noise texture */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 48px 48px;
+    opacity: 0.25;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .page { position: relative; z-index: 1; max-width: 1400px; margin: 0 auto; padding: 40px 32px 80px; }
+
+  /* ---- HEADER ---- */
+  header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 48px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  .brand { display: flex; align-items: center; gap: 14px; }
+  .logo-mark {
+    width: 42px; height: 42px;
+    background: var(--accent);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Syne', sans-serif;
+    font-size: 18px; font-weight: 800;
+    color: var(--bg);
+    flex-shrink: 0;
+  }
+  .brand-text h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: 22px; font-weight: 800;
+    letter-spacing: -0.5px;
+    color: var(--text);
+  }
+  .brand-text p { font-size: 12px; color: var(--sub); font-family: 'DM Mono', monospace; margin-top: 2px; }
+  .header-meta { text-align: right; }
+  .event-id { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--sub); margin-bottom: 4px; }
+  .event-date { font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 700; color: var(--text); }
+
+  /* ---- KPI STRIP ---- */
+  .kpi-strip {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin-bottom: 32px;
+  }
+  .kpi {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 20px 16px;
+    position: relative;
+    overflow: hidden;
+    animation: fadeUp 0.4s ease both;
+  }
+  .kpi::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 2px;
+  }
+  .kpi.accent::before { background: var(--accent); }
+  .kpi.warn::before   { background: var(--warn); }
+  .kpi.ok::before     { background: var(--ok); }
+  .kpi.purple::before { background: #7b61ff; }
+  .kpi.orange::before { background: var(--q360); }
+  .kpi-label { font-size: 11px; color: var(--sub); font-family: 'DM Mono', monospace; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; }
+  .kpi-value { font-family: 'Syne', sans-serif; font-size: 32px; font-weight: 800; line-height: 1; }
+  .kpi-value.accent { color: var(--accent); }
+  .kpi-value.warn   { color: var(--warn); }
+  .kpi-value.ok     { color: var(--ok); }
+  .kpi-value.purple { color: #7b61ff; }
+  .kpi-value.orange { color: var(--q360); }
+  .kpi-sub { font-size: 11px; color: var(--sub); margin-top: 6px; }
+
+  /* ---- GRID LAYOUT ---- */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    animation: fadeUp 0.5s ease both;
+  }
+  .card-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 13px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--sub);
+    margin-bottom: 20px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .card-title span { color: var(--accent); font-size: 16px; }
+  .chart-wrap { position: relative; }
+
+  /* ---- VIEWER TABLE ---- */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--sub);
+    padding: 0 12px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  tbody tr {
+    border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
+    cursor: default;
+  }
+  tbody tr:hover { background: rgba(0,229,255,0.03); }
+  tbody tr:last-child { border-bottom: none; }
+  td {
+    padding: 11px 12px;
+    font-size: 13px;
+    font-family: 'DM Mono', monospace;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  td.dim { color: var(--sub); font-size: 11px; }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-family: 'DM Mono', monospace;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+  }
+  .badge-1080 { background: rgba(0,229,255,0.12); color: var(--q1080); border: 1px solid rgba(0,229,255,0.2); }
+  .badge-720  { background: rgba(123,97,255,0.12); color: var(--q720);  border: 1px solid rgba(123,97,255,0.2); }
+  .badge-360  { background: rgba(255,159,67,0.12); color: var(--q360);  border: 1px solid rgba(255,159,67,0.2); }
+  .badge-270  { background: rgba(255,77,109,0.12); color: var(--q270);  border: 1px solid rgba(255,77,109,0.2); }
+
+  .buf-bar-wrap { display: flex; align-items: center; gap: 8px; }
+  .buf-bar-bg { width: 64px; height: 6px; background: var(--muted); border-radius: 3px; overflow: hidden; flex-shrink: 0; }
+  .buf-bar-fill { height: 100%; border-radius: 3px; }
+
+  /* ---- QUALITY STACKED MINI ---- */
+  .q-stack { display: flex; height: 6px; border-radius: 3px; overflow: hidden; gap: 1px; }
+  .q-seg { height: 100%; }
+
+  /* ---- FOOTER ---- */
+  footer {
+    margin-top: 48px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  footer p { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <div class="brand">
+      <div class="logo-mark">HS</div>
+      <div class="brand-text">
+        <h1>QoS Analytics Dashboard</h1>
+        <p>Hive Streaming · Viewer Telemetry Pipeline</p>
+      </div>
+    </div>
+    <div class="header-meta">
+      <div class="event-id" id="eventId">Event ID: —</div>
+      <div class="event-date" id="eventDate">—</div>
+    </div>
+  </header>
+
+  <div class="kpi-strip" id="kpiStrip">
+    <div class="kpi accent" style="animation-delay:0s">
+      <div class="kpi-label">Total Viewers</div>
+      <div class="kpi-value accent" id="kpiViewers">—</div>
+      <div class="kpi-sub">active sessions</div>
+    </div>
+    <div class="kpi warn" style="animation-delay:0.05s">
+      <div class="kpi-label">Avg Buffering Ratio</div>
+      <div class="kpi-value warn" id="kpiAvgBuf">—</div>
+      <div class="kpi-sub">of total watch time</div>
+    </div>
+    <div class="kpi warn" style="animation-delay:0.1s">
+      <div class="kpi-label">Worst Buffering</div>
+      <div class="kpi-value warn" id="kpiMaxBuf">—</div>
+      <div class="kpi-sub">single viewer peak</div>
+    </div>
+    <div class="kpi ok" style="animation-delay:0.15s">
+      <div class="kpi-label">Avg Watch Time</div>
+      <div class="kpi-value ok" id="kpiWatch">—</div>
+      <div class="kpi-sub">per viewer session</div>
+    </div>
+    <div class="kpi purple" style="animation-delay:0.2s">
+      <div class="kpi-label">Dominant Quality</div>
+      <div class="kpi-value purple" id="kpiQuality">—</div>
+      <div class="kpi-sub">most viewers</div>
+    </div>
+  </div>
+
+  <div class="grid-3">
+    <div class="card" style="animation-delay:0.25s">
+      <div class="card-title"><span>◈</span> Buffering Ratio — All Viewers</div>
+      <div class="chart-wrap" style="height:220px">
+        <canvas id="chartBufBar"></canvas>
+      </div>
+    </div>
+    <div class="card" style="animation-delay:0.3s">
+      <div class="card-title"><span>◉</span> Dominant Quality</div>
+      <div class="chart-wrap" style="height:220px">
+        <canvas id="chartQualityPie"></canvas>
+      </div>
+    </div>
+    <div class="card" style="animation-delay:0.35s">
+      <div class="card-title"><span>◈</span> Avg Buffer Duration</div>
+      <div class="chart-wrap" style="height:220px">
+        <canvas id="chartBufDur"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card" style="animation-delay:0.4s">
+      <div class="card-title"><span>▦</span> Quality Distribution — All Viewers</div>
+      <div class="chart-wrap" style="height:200px">
+        <canvas id="chartQualityStacked"></canvas>
+      </div>
+    </div>
+    <div class="card" style="animation-delay:0.45s">
+      <div class="card-title"><span>◈</span> Buffering Events vs Duration</div>
+      <div class="chart-wrap" style="height:200px">
+        <canvas id="chartScatter"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="animation-delay:0.5s">
+    <div class="card-title"><span>≡</span> Viewer Session Details</div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Viewer ID</th>
+            <th>Watch Time</th>
+            <th>Buffering Ratio</th>
+            <th>Buffer Events</th>
+            <th>Avg Buffer</th>
+            <th>Dominant Quality</th>
+            <th>Quality Distribution</th>
+            <th>Snapshots</th>
+          </tr>
+        </thead>
+        <tbody id="viewerTable"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer>
+    <p>Hive Streaming · Data Engineer Assignment · Generated by viewer telemetry pipeline</p>
+    <p id="footerTs">—</p>
+  </footer>
+
+</div>
+
+<script>
+const DATA = [{"customer_id":"4cb0f1c9-19b3-408c-8a09-03bf153819cf","content_id":"5761d026-0569-437e-9033-16618b2c28fa","client_id":"01a63152-9513-4010-ac2e-d82af93a7391","event_date":"2025-11-13","session_start_ms":1763032047274,"session_end_ms":1763032847271,"watch_time_ms":829997,"snapshot_count":28,"total_buffering_events":36,"total_buffering_time_ms":156149,"buffering_ratio":0.1881320052964047,"avg_buffering_duration_ms":4337.472222222223,"dominant_quality":"1080p","quality_breakdown":[{"quality_label":"1080p","received_bytes":95539344,"share_pct":49.88},{"quality_label":"720p","received_bytes":69879788,"share_pct":36.48},{"quality_label":"270p","received_bytes":18719160,"share_pct":9.77},{"quality_label":"360p","received_bytes":7415096,"share_pct":3.87}],"total_received_bytes":232511444,"p2p_received_bytes":24261400,"p2p_ratio":0.10434497151030553},{"customer_id":"4cb0f1c9-19b3-408c-8a09-03bf153819cf","content_id":"5761d026-0569-437e-9033-16618b2c28fa","client_id":"22c0a830-c037-4a13-bb64-78d9c396df1f","event_date":"2025-11-13","session_start_ms":1763032039110,"session_end_ms":1763032853894,"watch_time_ms":844784,"snapshot_count":27,"total_buffering_events":40,"total_buffering_time_ms":166076,"buffering_ratio":0.19658989753593817,"avg_buffering_duration_ms":4151.9,"dominant_quality":"720p","quality_breakdown":[{"quality_label":"720p","received_bytes":124810756,"share_pct":58.87},{"quality_label":"1080p","received_bytes":62020260,"share_pct":29.25},{"quality_label":"270p","received_bytes":20376944,"share_pct":9.61},{"quality_label":"360p","received_bytes":4791556,"share_pct":2.26}],"total_received_bytes":240606348,"p2p_received_bytes":44249372,"p2p_ratio":0.18390774959935804},{"customer_id":"4cb0f1c9-19b3-408c-8a09-03bf153819cf","content_id":"5761d026-0569-437e-9033-16618b2c28fa","client_id":"313aa0e6-04ea-471b-8ec4-b347043b5e00","event_date":"2025-11-13","session_start_ms":1763032044770,"session_end_ms":1763032815137,"watch_time_ms":800367,"snapshot_count":26,"total_buffering_events":28,"total_buffering_time_ms":116665,"buffering_ratio":0.14576438059040414,"avg_buffering_duration_ms":4166.607142857143,"dominant_quality":"720p","quality_breakdown":[{"quality_label":"720p","received_bytes":131850604,"share_pct":66.68},{"quality_label":"1080p","received_bytes":47604232,"share_pct":24.07},{"quality_label":"270p","received_bytes":16842920,"share_pct":8.52},{"quality_label":"360p","received_bytes":1444404,"share_pct":0.73}],"total_received_bytes":203706836,"p2p_received_bytes":13382216,"p2p_ratio":0.06569350475798466},{"customer_id":"4cb0f1c9-19b3-408c-8a09-03bf153819cf","content_id":"5761d026-0569-437e-9033-16618b2c28fa","client_id":"35a1e10d-9cad-4839-b5a3-1e1ba0913d25","event_date":"2025-11-13","session_start_ms":1763032031474,"session_end_ms":1763032842138,"watch_time_ms":840664,"snapshot_count":30,"total_buffering_events":44,"total_buffering_time_ms":183172,"buffering_ratio":0.21788966816706792,"avg_buffering_duration_ms":4163.0,"dominant_quality":"1080p","quality_breakdown":[{"quality_label":"1080p","received_bytes":152388288,"share_pct":66.8},{"quality_label":"720p","received_bytes":51363104,"share_pct":22.52},{"quality_label":"270p","received_bytes":22573160,"share_pct":9.9},{"quality_label":"360p","received_bytes":1799912,"share_pct":0.79}],"total_received_bytes":254294628,"p2p_received_bytes":27830204,"p2p_ratio":0.10944078614197073},{"customer_id":"4cb0f1c9-19b3-408c-8a09-03bf153819cf","content_id":"5761d026-0569-437e-9033-16618b2c28fa","client_id":"44d4aa0b-5fa2-474c-adfb-07544846b35e","event_date":"2025-11-13","session_start_ms":1763032044169,"session_end_ms":1763032847888,"watch_time_ms":833719,"snapshot_count":29,"total_buffering_events":30,"total_buffering_time_ms":85903,"buffering_ratio":0.10303591497854793,"avg_buffering_duration_ms":2863.4333333333334,"dominant_quality":"1080p","quality_breakdown":[{"quality_label":"1080p","received_bytes":281308348,"share_pct":76.1},{"quality_label":"720p","received_bytes":71408792,"share_pct":19.32},{"quality_label":"270p","received_bytes":15737668,"share_pct":4.26},{"quality_label":"360p","received_bytes":1188724,"share_pct":0.32}],"total_received_bytes":435355924,"p2p_received_bytes":39123176,"p2p_ratio":0.08986480680115887},{"customer_id":"4cb0f1c9-19b3-408c-8a09-03bf153819cf","content_id":"5761d026-0569-437e-9033-16618b2c28fa","client_id":"46c9a090-1115-402a-94d2-30b4ee1269fa","event_date":"2025-11-13","session_start_ms":1763032036522,"session_end_ms":1763032843896,"watch_time_ms":837374,"snapshot_count":29,"total_buffering_events":34,"total_buffering_time_ms":90259,"buffering_ratio":0.10778815678537905,"avg_buffering_duration_ms":2654.676470588235,"dominant_quality":"1080p","quality_breakdown":[{"quality_label":"1080p","received_bytes":204661500,"share_pct":68.04},{"quality_label":"720p","received_bytes":74110540,"share_pct":24.64},{"quality_label":"270p","received_bytes":19875360,"share_pct":6.61},{"quality_label":"360p","received_bytes":2152412,"share_pct":0.72}],"total_received_bytes":337541968,"p2p_received_bytes":12650708,"p2p_ratio":0.03747891876959134},{"customer_id":"4cb0f1c9-19b3-408c-8a09-03bf153819cf","content_id":"5761d026-0569-437e-9033-16618b2c28fa","client_id":"6d26c8bb-4910-45fe-aabb-e20166be7ddb","event_date":"2025-11-13","session_start_ms":1763032061591,"session_end_ms":1763032835668,"watch_time_ms":804077,"snapshot_count":28,"total_buffering_events":27,"total_buffering_time_ms":129008,"buffering_ratio":0.16044234569574806,"avg_buffering_duration_ms":4778.074074074074,"dominant_quality":"720p","quality_breakdown":[{"quality_label":"720p","received_bytes":67111864,"share_pct":45.14},{"quality_label":"1080p","received_bytes":43332308,"share_pct":29.15},{"quality_label":"360p","received_bytes":25879704,"share_pct":17.41},{"quality_label":"270p","received_bytes":12354044,"share_pct":8.31}],"total_received_bytes":176175928,"p2p_received_bytes":22332144,"p2p_ratio":0.1267604732015375},{"customer_id":"4cb0f1c9-19b3-408c-8a09-03bf153819cf","content_id":"5761d026-0569-437e-9033-16618b2c28fa","client_id":"6e3d805b-409b-4b57-9113-6ba3c8b2d684","event_date":"2025-11-13","session_start_ms":1763032023688,"session_end_ms":1763032853731,"watch_time_ms":860043,"snapshot_count":30,"total_buffering_events":28,"total_buffering_time_ms":58720,"buffering_ratio":0.06827565598464262,"avg_buffering_duration_ms":2097.1428571428573,"dominant_quality":"720p","quality_breakdown":[{"quality_label":"720p","received_bytes":109950672,"share_pct":56.87},{"quality_label":"1080p","received_bytes":33681516,"share_pct":17.42},{"quality_label":"360p","received_bytes":28823220,"share_pct":14.91},{"quality_label":"270p","received_bytes":20866120,"share_pct":10.79}],"total_received_bytes":224067612,"p2p_received_bytes":26814440,"p2p_ratio":0.11967119995905522},{"customer_id":"4cb0f1c9-19b3-408c-8a09-03bf153819cf","content_id":"5761d026-0569-437e-9033-16618b2c28fa","client_id":"6fc0c270-0ce5-40aa-88bd-2ed26cc27141","event_date":"2025-11-13","session_start_ms":1763032103471,"session_end_ms":1763032834749,"watch_time_ms":761278,"snapshot_count":26,"total_buffering_events":32,"total_buffering_time_ms":68430,"buffering_ratio":0.08988831937872893,"avg_buffering_duration_ms":2138.4375,"dominant_quality":"1080p","quality_breakdown":[{"quality_label":"1080p","received_bytes":204592316,"share_pct":70.15},{"quality_label":"720p","received_bytes":67552724,"share_pct":23.16},{"quality_label":"270p","received_bytes":17316680,"share_pct":5.94},{"quality_label":"360p","received_bytes":2169896,"share_pct":0.74}],"total_received_bytes":332957212,"p2p_received_bytes":69520332,"p2p_ratio":0.2087965945606248},{"customer_id":"4cb0f1c9-19b3-408c-8a09-03bf153819cf","content_id":"5761d026-0569-437e-9033-16618b2c28fa","client_id":"8e39b554-af6d-4db2-a3fd-0e511ceeb904","event_date":"2025-11-13","session_start_ms":1763032087101,"session_end_ms":1763032842848,"watch_time_ms":785747,"snapshot_count":29,"total_buffering_events":36,"total_buffering_time_ms":98494,"buffering_ratio":0.12535078084930645,"avg_buffering_duration_ms":2735.9444444444443,"dominant_quality":"360p","quality_breakdown":[{"quality_label":"360p","received_bytes":51424204,"share_pct":49.1},{"quality_label":"720p","received_bytes":23986356,"share_pct":22.9},{"quality_label":"270p","received_bytes":19909388,"share_pct":19.01},{"quality_label":"1080p","received_bytes":9416168,"share_pct":8.99}],"total_received_bytes":115325780,"p2p_received_bytes":29444372,"p2p_ratio":0.25531474402340915},{"customer_id":"4cb0f1c9-19b3-408c-8a09-03bf153819cf","content_id":"5761d026-0569-437e-9033-16618b2c28fa","client_id":"9359a34a-29de-4311-88a6-eebd158955ce","event_date":"2025-11-13","session_start_ms":1763032047646,"session_end_ms":1763032851403,"watch_time_ms":833757,"snapshot_count":28,"total_buffering_events":28,"total_buffering_time_ms":91008,"buffering_ratio":0.10915410605248292,"avg_buffering_duration_ms":3250.285714285714,"dominant_quality":"1080p","quality_breakdown":[{"quality_label":"1080p","received_bytes":210169712,"share_pct":64.06},{"quality_label":"720p","received_bytes":101379564,"share_pct":30.9},{"quality_label":"270p","received_bytes":13832664,"share_pct":4.22},{"quality_label":"360p","received_bytes":2699304,"share_pct":0.82}],"total_received_bytes":375083500,"p2p_received_bytes":46627196,"p2p_ratio":0.12431150930392833},{"customer_id":"4cb0f1c9-19b3-408c-8a09-03bf153819cf","content_id":"5761d026-0569-437e-9033-16618b2c28fa","client_id":"9a7a06ce-62c6-4e31-a15c-3d1e70620797","event_date":"2025-11-13","session_start_ms":1763032033774,"session_end_ms":1763032838209,"watch_time_ms":834435,"snapshot_count":29,"total_buffering_events":29,"total_buffering_time_ms":76592,"buffering_ratio":0.09178905486946257,"avg_buffering_duration_ms":2641.103448275862,"dominant_quality":"720p","quality_breakdown":[{"quality_label":"720p","received_bytes":128552144,"share_pct":53.45},{"quality_label":"1080p","received_bytes":80575860,"share_pct":33.5},{"quality_label":"270p","received_bytes":19879496,"share_pct":8.27},{"quality_label":"360p","received_bytes":11507480,"share_pct":4.78}],"total_received_bytes":267097804,"p2p_received_bytes":48859696,"p2p_ratio":0.18292810823708608},{"customer_id":"4cb0f1c9-19b3-408c-8a09-03bf153819cf","content_id":"5761d026-0569-437e-9033-16618b2c28fa","client_id":"9ac455d2-7257-45a3-bd21-a6242a0c43e1","event_date":"2025-11-13","session_start_ms":1763032048120,"session_end_ms":1763032841589,"watch_time_ms":823469,"snapshot_count":26,"total_buffering_events":30,"total_buffering_time_ms":146380,"buffering_ratio":0.1777601828362695,"avg_buffering_duration_ms":4879.333333333333,"dominant_quality":"720p","quality_breakdown":[{"quality_label":"720p","received_bytes":47765348,"share_pct":36.87},{"quality_label":"1080p","received_bytes":33461932,"share_pct":25.83},{"quality_label":"270p","received_bytes":25180344,"share_pct":19.44},{"quality_label":"360p","received_bytes":23131144,"share_pct":17.86}],"total_received_bytes":236405676,"p2p_received_bytes":94800692,"p2p_ratio":0.4010085273925487},{"customer_id":"4cb0f1c9-19b3-408c-8a09-03bf153819cf","content_id":"5761d026-0569-437e-9033-16618b2c28fa","client_id":"ab7fff07-5941-428e-9bd5-e72ce89388a7","event_date":"2025-11-13","session_start_ms":1763032045406,"session_end_ms":1763032857123,"watch_time_ms":841717,"snapshot_count":30,"total_buffering_events":30,"total_buffering_time_ms":149464,"buffering_ratio":0.17757037103919726,"avg_buffering_duration_ms":4982.133333333333,"dominant_quality":"1080p","quality_breakdown":[{"quality_label":"1080p","received_bytes":129058428,"share_pct":53.51},{"quality_label":"720p","received_bytes":80796384,"share_pct":33.5},{"quality_label":"270p","received_bytes":16371792,"share_pct":6.79},{"quality_label":"360p","received_bytes":14943744,"share_pct":6.2}],"total_received_bytes":263346640,"p2p_received_bytes":34415656,"p2p_ratio":0.13068576079041677},{"customer_id":"4cb0f1c9-19b3-408c-8a09-03bf153819cf","content_id":"5761d026-0569-437e-9033-16618b2c28fa","client_id":"b4d80be9-7376-41bb-bb2e-237878e6103d","event_date":"2025-11-13","session_start_ms":1763032024137,"session_end_ms":1763032844596,"watch_time_ms":850459,"snapshot_count":30,"total_buffering_events":37,"total_buffering_time_ms":133029,"buffering_ratio":0.15642023895331814,"avg_buffering_duration_ms":3595.3783783783783,"dominant_quality":"1080p","quality_breakdown":[{"quality_label":"1080p","received_bytes":205615036,"share_pct":64.97},{"quality_label":"720p","received_bytes":91335476,"share_pct":28.86},{"quality_label":"270p","received_bytes":19548616,"share_pct":6.18},{"quality_label":"360p","received_bytes":0,"share_pct":0.0}],"total_received_bytes":355470212,"p2p_received_bytes":90466728,"p2p_ratio":0.25449875951912393},{"customer_id":"4cb0f1c9-19b3-408c-8a09-03bf153819cf","content_id":"5761d026-0569-437e-9033-16618b2c28fa","client_id":"bf61c04b-3382-4c7c-8f46-3203d2668a58","event_date":"2025-11-13","session_start_ms":1763032244803,"session_end_ms":1763032848782,"watch_time_ms":633979,"snapshot_count":23,"total_buffering_events":27,"total_buffering_time_ms":64680,"buffering_ratio":0.10202230673255738,"avg_buffering_duration_ms":2395.5555555555557,"dominant_quality":"1080p","quality_breakdown":[{"quality_label":"1080p","received_bytes":176262596,"share_pct":64.21},{"quality_label":"720p","received_bytes":79454628,"share_pct":28.94},{"quality_label":"270p","received_bytes":17474412,"share_pct":6.37},{"quality_label":"360p","received_bytes":1312052,"share_pct":0.48}],"total_received_bytes":294690752,"p2p_received_bytes":86257408,"p2p_ratio":0.29270483520297236},{"customer_id":"4cb0f1c9-19b3-408c-8a09-03bf153819cf","content_id":"5761d026-0569-437e-9033-16618b2c28fa","client_id":"ca4c2a03-63de-4386-bf8b-ac0132fcb6df","event_date":"2025-11-13","session_start_ms":1763032030974,"session_end_ms":1763032842291,"watch_time_ms":841317,"snapshot_count":29,"total_buffering_events":29,"total_buffering_time_ms":105684,"buffering_ratio":0.12561733567727743,"avg_buffering_duration_ms":3644.2758620689656,"dominant_quality":"1080p","quality_breakdown":[{"quality_label":"1080p","received_bytes":123718664,"share_pct":45.03},{"quality_label":"720p","received_bytes":119321908,"share_pct":43.43},{"quality_label":"270p","received_bytes":16436276,"share_pct":5.98},{"quality_label":"360p","received_bytes":15257892,"share_pct":5.55}],"total_received_bytes":294017524,"p2p_received_bytes":29753068,"p2p_ratio":0.1011948797990694},{"customer_id":"4cb0f1c9-19b3-408c-8a09-03bf153819cf","content_id":"5761d026-0569-437e-9033-16618b2c28fa","client_id":"d5689fea-c687-46dc-869a-233899aa2a71","event_date":"2025-11-13","session_start_ms":1763032032851,"session_end_ms":1763032860628,"watch_time_ms":857777,"snapshot_count":29,"total_buffering_events":29,"total_buffering_time_ms":71626,"buffering_ratio":0.08350188918565081,"avg_buffering_duration_ms":2469.862068965517,"dominant_quality":"1080p","quality_breakdown":[{"quality_label":"1080p","received_bytes":147433548,"share_pct":56.14},{"quality_label":"720p","received_bytes":86546740,"share_pct":32.95},{"quality_label":"270p","received_bytes":21460200,"share_pct":8.17},{"quality_label":"360p","received_bytes":7195512,"share_pct":2.74}],"total_received_bytes":340129976,"p2p_received_bytes":32783064,"p2p_ratio":0.09638393059481473},{"customer_id":"4cb0f1c9-19b3-408c-8a09-03bf153819cf","content_id":"5761d026-0569-437e-9033-16618b2c28fa","client_id":"e7d7517f-31a5-4892-9cf2-b221cdb2cb6f","event_date":"2025-11-13","session_start_ms":1763032043110,"session_end_ms":1763032858397,"watch_time_ms":845287,"snapshot_count":29,"total_buffering_events":30,"total_buffering_time_ms":85977,"buffering_ratio":0.10171338255527412,"avg_buffering_duration_ms":2865.9,"dominant_quality":"1080p","quality_breakdown":[{"quality_label":"1080p","received_bytes":414446188,"share_pct":81.93},{"quality_label":"720p","received_bytes":73953748,"share_pct":14.62},{"quality_label":"270p","received_bytes":17423276,"share_pct":3.44}],"total_received_bytes":510594464,"p2p_received_bytes":53999992,"p2p_ratio":0.10575906283229894},{"customer_id":"4cb0f1c9-19b3-408c-8a09-03bf153819cf","content_id":"5761d026-0569-437e-9033-16618b2c28fa","client_id":"f63c5309-d0c6-4643-b9b0-63306d06f3d3","event_date":"2025-11-13","session_start_ms":1763032030005,"session_end_ms":1763032845523,"watch_time_ms":845518,"snapshot_count":31,"total_buffering_events":31,"total_buffering_time_ms":113983,"buffering_ratio":0.13480848426644967,"avg_buffering_duration_ms":3676.8709677419356,"dominant_quality":"1080p","quality_breakdown":[{"quality_label":"1080p","received_bytes":162718888,"share_pct":55.43},{"quality_label":"720p","received_bytes":110980912,"share_pct":37.8},{"quality_label":"270p","received_bytes":16816412,"share_pct":5.73},{"quality_label":"360p","received_bytes":3048796,"share_pct":1.04}],"total_received_bytes":320728564,"p2p_received_bytes":14390460,"p2p_ratio":0.04486803364355162}];
+
+const QUALITY_COLORS = { '1080p':'#00e5ff', '720p':'#7b61ff', '360p':'#ff9f43', '270p':'#ff4d6d' };
+const CHART_DEFAULTS = {
+  color: '#e2e6f0',
+  plugins: { legend: { labels: { color: '#7a8099', font: { family: 'DM Mono', size: 10 } } } },
+};
+Chart.defaults.color = '#e2e6f0';
+Chart.defaults.font.family = 'DM Mono';
+
+function fmt(n, dec=1) { return n.toFixed(dec); }
+function fmtMs(ms) {
+  const s = ms / 1000;
+  return s >= 60 ? `${fmt(s/60,1)}m` : `${fmt(s,0)}s`;
+}
+
+function init() {
+  const n = DATA.length;
+  const avgBuf = DATA.reduce((a,d)=>a+d.buffering_ratio,0)/n;
+  const maxBuf = Math.max(...DATA.map(d=>d.buffering_ratio));
+  const avgWatch = DATA.reduce((a,d)=>a+d.watch_time_ms,0)/n;
+  const qualCounts = {};
+  DATA.forEach(d=>{ qualCounts[d.dominant_quality]=(qualCounts[d.dominant_quality]||0)+1; });
+  const topQ = Object.entries(qualCounts).sort((a,b)=>b[1]-a[1])[0][0];
+
+  document.getElementById('eventId').textContent = 'Event ID: ' + DATA[0].content_id.slice(0,8) + '…';
+  document.getElementById('eventDate').textContent = DATA[0].event_date;
+  document.getElementById('kpiViewers').textContent = n;
+  document.getElementById('kpiAvgBuf').textContent = fmt(avgBuf*100)+'%';
+  document.getElementById('kpiMaxBuf').textContent = fmt(maxBuf*100)+'%';
+  document.getElementById('kpiWatch').textContent = fmtMs(avgWatch);
+  document.getElementById('kpiQuality').textContent = topQ;
+  document.getElementById('footerTs').textContent = 'Report date: ' + DATA[0].event_date;
+
+  buildBufBarChart();
+  buildQualityPie(qualCounts);
+  buildBufDurChart();
+  buildQualityStacked();
+  buildScatter();
+  buildTable();
+}
+
+function buildBufBarChart() {
+  const sorted = [...DATA].sort((a,b)=>b.buffering_ratio-a.buffering_ratio);
+  const ctx = document.getElementById('chartBufBar').getContext('2d');
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: sorted.map(d=>d.client_id.slice(0,8)),
+      datasets: [{
+        data: sorted.map(d=>+(d.buffering_ratio*100).toFixed(2)),
+        backgroundColor: sorted.map(d=>d.buffering_ratio>0.18?'rgba(255,77,109,0.7)':d.buffering_ratio>0.12?'rgba(255,159,67,0.7)':'rgba(0,229,255,0.5)'),
+        borderColor: sorted.map(d=>d.buffering_ratio>0.18?'#ff4d6d':d.buffering_ratio>0.12?'#ff9f43':'#00e5ff'),
+        borderWidth: 1, borderRadius: 3,
+      }]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: c=>`${c.raw}% buffering` } } },
+      scales:{
+        x:{ ticks:{color:'#3a3f55',font:{size:9}}, grid:{color:'rgba(30,33,48,0.8)'} },
+        y:{ ticks:{color:'#7a8099',font:{size:9}, callback:v=>v+'%'}, grid:{color:'rgba(30,33,48,0.8)'}, beginAtZero:true }
+      }
+    }
+  });
+}
+
+function buildQualityPie(qualCounts) {
+  const ctx = document.getElementById('chartQualityPie').getContext('2d');
+  const labels = Object.keys(qualCounts);
+  new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets:[{ data: labels.map(l=>qualCounts[l]), backgroundColor: labels.map(l=>QUALITY_COLORS[l]||'#555'), borderColor:'#0f1117', borderWidth:3, hoverOffset:6 }]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false, cutout:'65%',
+      plugins:{ legend:{ position:'bottom', labels:{ color:'#7a8099', boxWidth:10, padding:12, font:{size:10} } }, tooltip:{ callbacks:{ label: c=>`${c.label}: ${c.raw} viewers` } } }
+    }
+  });
+}
+
+function buildBufDurChart() {
+  const sorted = [...DATA].sort((a,b)=>b.avg_buffering_duration_ms-a.avg_buffering_duration_ms);
+  const ctx = document.getElementById('chartBufDur').getContext('2d');
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: sorted.map(d=>d.client_id.slice(0,8)),
+      datasets:[{ data: sorted.map(d=>+(d.avg_buffering_duration_ms/1000).toFixed(2)), backgroundColor:'rgba(123,97,255,0.6)', borderColor:'#7b61ff', borderWidth:1, borderRadius:3 }]
+    },
+    options: {
+      indexAxis:'y', responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: c=>`${c.raw}s avg buffer` } } },
+      scales:{
+        x:{ ticks:{color:'#7a8099',font:{size:9}, callback:v=>v+'s'}, grid:{color:'rgba(30,33,48,0.8)'}, beginAtZero:true },
+        y:{ ticks:{color:'#3a3f55',font:{size:8}}, grid:{display:false} }
+      }
+    }
+  });
+}
+
+function buildQualityStacked() {
+  const ctx = document.getElementById('chartQualityStacked').getContext('2d');
+  const sorted = [...DATA].sort((a,b)=>b.buffering_ratio-a.buffering_ratio);
+  const labels = ['1080p','720p','360p','270p'];
+  const datasets = labels.map(ql=>({
+    label: ql,
+    data: sorted.map(d=>{ const qb = d.quality_breakdown.find(q=>q.quality_label===ql); return qb ? +qb.share_pct.toFixed(1) : 0; }),
+    backgroundColor: QUALITY_COLORS[ql]+'99',
+    borderColor: QUALITY_COLORS[ql],
+    borderWidth:1,
+  }));
+  new Chart(ctx, {
+    type:'bar',
+    data:{ labels: sorted.map(d=>d.client_id.slice(0,8)), datasets },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ position:'bottom', labels:{ color:'#7a8099', boxWidth:10, padding:10, font:{size:10} } }, tooltip:{ callbacks:{ label: c=>`${c.dataset.label}: ${c.raw}%` } } },
+      scales:{
+        x:{ stacked:true, ticks:{color:'#3a3f55',font:{size:8}}, grid:{color:'rgba(30,33,48,0.8)'} },
+        y:{ stacked:true, ticks:{color:'#7a8099',font:{size:9}, callback:v=>v+'%'}, grid:{color:'rgba(30,33,48,0.8)'}, max:100 }
+      }
+    }
+  });
+}
+
+function buildScatter() {
+  const ctx = document.getElementById('chartScatter').getContext('2d');
+  new Chart(ctx, {
+    type:'scatter',
+    data:{
+      datasets:[{
+        label:'Viewers',
+        data: DATA.map(d=>({ x:d.total_buffering_events, y:+(d.avg_buffering_duration_ms/1000).toFixed(2), r:6 })),
+        backgroundColor: DATA.map(d=>QUALITY_COLORS[d.dominant_quality]+'99'||'#ffffff55'),
+        borderColor: DATA.map(d=>QUALITY_COLORS[d.dominant_quality]||'#fff'),
+        borderWidth:1, pointRadius:7, pointHoverRadius:9,
+      }]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: c=>`${c.raw.x} events, ${c.raw.y}s avg` } } },
+      scales:{
+        x:{ title:{display:true, text:'Total Buffering Events', color:'#7a8099', font:{size:10}}, ticks:{color:'#7a8099',font:{size:9}}, grid:{color:'rgba(30,33,48,0.8)'} },
+        y:{ title:{display:true, text:'Avg Duration (s)', color:'#7a8099', font:{size:10}}, ticks:{color:'#7a8099',font:{size:9}}, grid:{color:'rgba(30,33,48,0.8)'} }
+      }
+    }
+  });
+}
+
+function buildTable() {
+  const sorted = [...DATA].sort((a,b)=>b.buffering_ratio-a.buffering_ratio);
+  const tbody = document.getElementById('viewerTable');
+  sorted.forEach(d => {
+    const ratio = d.buffering_ratio;
+    const barColor = ratio>0.18 ? '#ff4d6d' : ratio>0.12 ? '#ff9f43' : '#00e5ff';
+    const badgeClass = {'1080p':'badge-1080','720p':'badge-720','360p':'badge-360','270p':'badge-270'}[d.dominant_quality]||'badge-1080';
+    const qStack = ['1080p','720p','360p','270p'].map(ql=>{
+      const qb = d.quality_breakdown.find(q=>q.quality_label===ql);
+      return qb&&qb.share_pct>0 ? `<div class="q-seg" style="width:${qb.share_pct}%;background:${QUALITY_COLORS[ql]}88"></div>` : '';
+    }).join('');
+
+    tbody.innerHTML += `<tr>
+      <td>${d.client_id.slice(0,8)}<span style="color:#3a3f55">…</span></td>
+      <td>${fmtMs(d.watch_time_ms)}</td>
+      <td>
+        <div class="buf-bar-wrap">
+          <div class="buf-bar-bg"><div class="buf-bar-fill" style="width:${Math.min(ratio*100,100)}%;background:${barColor}"></div></div>
+          <span style="color:${barColor};font-size:12px">${fmt(ratio*100)}%</span>
+        </div>
+      </td>
+      <td>${d.total_buffering_events}</td>
+      <td class="dim">${fmt(d.avg_buffering_duration_ms/1000)}s</td>
+      <td><span class="badge ${badgeClass}">${d.dominant_quality}</span></td>
+      <td><div class="q-stack" style="width:120px">${qStack}</div></td>
+      <td class="dim">${d.snapshot_count}</td>
+    </tr>`;
+  });
+}
+
+init();
+</script>
+</body>
+</html>
