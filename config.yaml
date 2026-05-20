@@ -1,0 +1,21 @@
+# Hive Telemetry Pipeline Configuration
+# Override per environment; never hardcode these in source.
+
+pipeline:
+  # Path to the Delta Lake table root (or plain parquet directory)
+  input_path: "../dataset/data_engineer_assignment_dataset"
+
+  # Output directory for metrics files
+  output_path: "./output"
+
+  # Approximate heartbeat interval in ms. Used to estimate total watch time.
+  # Should match the actual telemetry emission cadence from the player plugin.
+  heartbeat_interval_ms: 30000
+
+  # Minimum snapshots a viewer must have to be included in output.
+  # Filters out viewers who connected for <1 interval (noise).
+  min_snapshots: 1
+
+logging:
+  level: INFO
+  format: "%(asctime)s [%(levelname)s] %(name)s — %(message)s"
